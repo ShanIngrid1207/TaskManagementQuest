@@ -21,6 +21,13 @@ App.AppController = class AppController {
     this.currentUser = currentUser;
     this.dataStore = dataStore;
 
+    /* Comment threads live here, NOT on the task rows — a task row is replaced
+       wholesale by the 30s sync poll, which used to shear the open thread off
+       mid-typing and make every idle poll look like a change. See CommentStore. */
+    this.comments = new App.CommentStore({
+      load: (dataStore && dataStore.loadComments) ? (id) => dataStore.loadComments(id) : null,
+    });
+
     this.uiState = {
       view: App.can('tasks.view') ? 'all' : 'time:mine',
       // Scope segment ("My work" / "Company"): an orthogonal narrowing applied
@@ -729,18 +736,24 @@ App.AppController = class AppController {
     return this._recentComments;
   }
 
-  // Lazy-load a task's comments into task.comments, then re-render the detail.
+  // Lazy-load a task's thread, then re-render the detail. The store handles
+  // load-once and in-flight dedupe, so a burst of renders costs one round trip.
   async loadTaskComments(taskId) {
-    const t = this.taskModel.find(taskId);
-    if (!t || t._commentsLoaded) return;
-    t._commentsLoaded = true; // set first so concurrent renders don't double-fetch
-    try {
-      t.comments = await this.dataStore.loadComments(taskId);
-    } catch (e) {
-      console.warn('[comments] load failed:', e);
-      t.comments = t.comments || [];
-    }
+    if (this.comments.isLoaded(taskId)) return;
+    await this.comments.ensureLoaded(taskId);
     App.EventBus.emit('comments:changed', taskId);
+  }
+
+  /* Keep the thread the user is currently looking at up to date with everyone
+     else's. Called from the same 30s sync poll that refreshes tasks; only the
+     open thread is worth a query, and it re-renders ONLY when the rows really
+     changed — a quiet thread must never disturb someone typing into it. */
+  async refreshOpenThread() {
+    const taskId = this.uiState.selectedTaskId;
+    if (!taskId) return false;
+    const changed = await this.comments.refresh(taskId);
+    if (changed) App.EventBus.emit('comments:changed', taskId);
+    return changed;
   }
 
   async addTaskComment(taskId, body, mentions, kind) {
@@ -758,9 +771,7 @@ App.AppController = class AppController {
       if (this.toastView) this.toastView.show({ title: 'Comment not saved', sub: 'Please try again.' });
       return;
     }
-    t.comments = t.comments || [];
-    t.comments.push(saved);
-    t._commentsLoaded = true;
+    this.comments.append(taskId, saved);
     this._notifyComment(t, text, mentions || []);
     App.EventBus.emit('comments:changed', taskId);
   }
@@ -1155,25 +1166,17 @@ App.AppController = class AppController {
   // re-render immediately, then reconcile with the datastore; on failure we
   // revert and toast. One row per (comment, me, emoji) — see migration 064.
   async toggleReaction(taskId, commentId, emoji) {
-    const t = this.taskModel.find(taskId);
-    if (!t || !Array.isArray(t.comments)) return;
-    const c = t.comments.find(x => x.id === commentId);
-    if (!c) return;
-    c.reactions = Array.isArray(c.reactions) ? c.reactions : [];
-    const me = this.currentUser;
-    const had = c.reactions.some(r => r.memberId === me && r.emoji === emoji);
-    // Optimistic local flip.
-    if (had) c.reactions = c.reactions.filter(r => !(r.memberId === me && r.emoji === emoji));
-    else c.reactions.push({ memberId: me, emoji });
+    // The store flips it and hands back the exact undo, so the optimistic write
+    // and its rollback can't drift apart.
+    const flip = this.comments.toggleReaction(taskId, commentId, this.currentUser, emoji);
+    if (!flip) return;
     App.EventBus.emit('comments:changed', taskId);
     try {
-      if (had) await this.dataStore.removeReaction(commentId, emoji);
+      if (flip.had) await this.dataStore.removeReaction(commentId, emoji);
       else await this.dataStore.addReaction(commentId, emoji);
     } catch (e) {
       console.error('[reactions] toggle failed:', e);
-      // Revert to the pre-flip state and re-render.
-      if (had) c.reactions.push({ memberId: me, emoji });
-      else c.reactions = c.reactions.filter(r => !(r.memberId === me && r.emoji === emoji));
+      flip.revert();
       if (this.toastView) this.toastView.show({ title: 'Reaction not saved', sub: 'Please try again.' });
       App.EventBus.emit('comments:changed', taskId);
     }

@@ -391,6 +391,12 @@ document.addEventListener('DOMContentLoaded', async () => {
           taskModel.mergeServer(freshTasks);
         }
       } catch (e) { ok = false; console.warn('[app] task poll failed', e); }
+      // Comment threads are NOT part of the task row, so the pull above can't
+      // carry them — refresh the open one explicitly. It re-renders only if the
+      // rows actually changed, so this never disturbs someone mid-comment.
+      try {
+        await controller.refreshOpenThread();
+      } catch (e) { ok = false; console.warn('[app] comment refresh failed', e); }
       try {
         const fresh = await dataStore.loadNotifications();
         const arrivals = fresh.filter(n => !seenNotifIds.has(n.id) && !n.read);

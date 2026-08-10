@@ -264,7 +264,7 @@ App.TaskDetailView = class TaskDetailView {
     }
     const canNav = typeof this.controller.selectAdjacentTask === 'function' && navTotal > 1;
     const isWatching = watcherIds.includes(this.currentUser);
-    const commentsCount = (t.comments || []).length;
+    const commentsCount = this._threads().count(t.id);
     const subtaskCount = (t.subtasks || []).length;
     const canDelete = this.controller.canDeleteTask(t);
     // Project folder chip — a picker trigger for writers, read-only otherwise.
@@ -675,7 +675,7 @@ App.TaskDetailView = class TaskDetailView {
     });
 
     // Comments: lazy-load on first render, then wire the composer.
-    if (!t._commentsLoaded) this.controller.loadTaskComments(t.id);
+    if (!this._threads().isLoaded(t.id)) this.controller.loadTaskComments(t.id);
     this._wireComments(t);
 
     // On first open, move focus into the dialog (not on background re-renders).
@@ -1054,15 +1054,25 @@ App.TaskDetailView = class TaskDetailView {
   }
 
   /* ---------- comments ---------- */
+
+  /* The comment threads (App.CommentStore, owned by the controller). Threads are
+     kept off the task row on purpose — see CommentStore's header. The empty
+     fallback is for preview harnesses whose stubbed controller has no store. */
+  _threads() {
+    if (this.controller.comments) return this.controller.comments;
+    if (!this._emptyThreads) this._emptyThreads = new App.CommentStore();
+    return this._emptyThreads;
+  }
+
   // Inner comments markup (list + composer) for the Activity/Comments/History
   // tab panel. No outer card — the tab panel is the container. `_wireComments`
   // finds #cmInput/#cmSend/#cmMentionMenu within this.pane after render.
   _commentsInner(t) {
     const esc = App.utils.escapeHtml;
-    const comments = t.comments || [];
+    const comments = this._threads().rows(t.id);
     const rows = comments.length
       ? comments.map(c => this._commentRow(c)).join('')
-      : (t._commentsLoaded
+      : (this._threads().isLoaded(t.id)
           ? `<div class="cm-empty">No comments yet. Start the conversation.</div>`
           : `<div class="cm-empty">Loading comments…</div>`);
     const draft = (this._commentDraft && this._commentDraft[t.id]) || '';

@@ -91,17 +91,20 @@ const SAMPLE = {
   stuck: { reason: 'Waiting on the HOA to email the stamped color approval.', on: 'kristin', at: '2026-07-03T15:00:00Z' },
   subtasks: [{ t: 'Order materials', d: true }, { t: 'Schedule crew', d: true }, { t: 'Pull permit', d: false }, { t: 'Final inspection', d: false }],
   activity: [{ who: 'Abraham Q.', what: 'created this task', at: null, when: '3d ago' }, { who: 'Alkeith R.', what: 'changed status To do → In progress', at: '1' }],
-  comments: [
-    { id: 'c1', authorId: 'kristin', kind: 'note', body: 'HOA approval just came through.', createdAt: '1',
-      reactions: [{ memberId: 'abraham', emoji: '🎉' }, { memberId: 'andres', emoji: '🎉' }, { memberId: 'alkeith', emoji: '👍' }] },
-    { id: 'c2', authorId: 'alkeith', kind: 'call', body: 'Homeowner confirmed Tuesday drop.', createdAt: '2',
-      reactions: [{ memberId: 'kristin', emoji: '✅' }] },
-    { id: 'c3', authorId: 'andres', kind: 'comment', body: 'Drafting the flashing detail now @kristin', createdAt: '3', reactions: [] },
-    // Legacy row (pre-064): kind 'comment' but 📞 body — should still tag CALL LOG.
-    { id: 'c4', authorId: 'abraham', kind: 'comment', body: '📞 Logged a call — left a voicemail.', createdAt: '4', reactions: [] },
-  ],
-  createdAt: '2026-07-01T10:00:00Z', _commentsLoaded: true,
+  createdAt: '2026-07-01T10:00:00Z',
 };
+
+// The thread is NOT part of the task row — it's seeded into App.CommentStore
+// below, the same seam the real app uses.
+const SAMPLE_COMMENTS = [
+  { id: 'c1', authorId: 'kristin', kind: 'note', body: 'HOA approval just came through.', createdAt: '1',
+    reactions: [{ memberId: 'abraham', emoji: '🎉' }, { memberId: 'andres', emoji: '🎉' }, { memberId: 'alkeith', emoji: '👍' }] },
+  { id: 'c2', authorId: 'alkeith', kind: 'call', body: 'Homeowner confirmed Tuesday drop.', createdAt: '2',
+    reactions: [{ memberId: 'kristin', emoji: '✅' }] },
+  { id: 'c3', authorId: 'andres', kind: 'comment', body: 'Drafting the flashing detail now @kristin', createdAt: '3', reactions: [] },
+  // Legacy row (pre-064): kind 'comment' but 📞 body — should still tag CALL LOG.
+  { id: 'c4', authorId: 'abraham', kind: 'comment', body: '📞 Logged a call — left a voicemail.', createdAt: '4', reactions: [] },
+];
 
 App.controller = {
   uiState: { selectedTaskId: 't1', view: 'all' },
@@ -120,13 +123,7 @@ App.controller = {
   addTaskComment: (id, text, mentions, kind) => alert(`comment (${kind || 'comment'}): ` + text),
   // Local toggle so reactions are clickable in the preview (me = 'abraham').
   toggleReaction: (taskId, commentId, emoji) => {
-    const c = (SAMPLE.comments || []).find(x => x.id === commentId);
-    if (!c) return;
-    c.reactions = c.reactions || [];
-    const had = c.reactions.some(r => r.memberId === 'abraham' && r.emoji === emoji);
-    c.reactions = had
-      ? c.reactions.filter(r => !(r.memberId === 'abraham' && r.emoji === emoji))
-      : c.reactions.concat([{ memberId: 'abraham', emoji }]);
+    if (!App.controller.comments.toggleReaction(taskId, commentId, 'abraham', emoji)) return;
     App.EventBus.emit('comments:changed', taskId);
   },
   updateTaskField: (id, f, v) => alert(`set ${f} = ${v} (preview)`),
@@ -145,7 +142,13 @@ App.timeField = { attachMask: () => {}, parse: (s) => s };
 </script>
 <script src="js/ui/Menu.js"></script>
 <script src="js/directory.js"></script>
+<script src="js/models/CommentStore.js"></script>
 <script src="js/views/TaskDetailView.js"></script>
+<script>
+  // Threads live in the store, not on the task row — seed the preview's.
+  App.controller.comments = new App.CommentStore();
+  App.controller.comments.hydrate('t1', SAMPLE_COMMENTS);
+</script>
 <script>
   new App.TaskDetailView({ taskModel: App.controller.taskModel, timeModel: App.controller.timeModel, controller: App.controller, currentUser: 'abraham' });
   App.EventBus.emit('selection:changed');

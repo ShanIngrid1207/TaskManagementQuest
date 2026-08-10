@@ -71,13 +71,47 @@ App.TaskModel = class TaskModel {
         if (local) merged.push(local);
       }
     }
-    const sig = list => JSON.stringify(
-      [...list].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-    );
-    const changed = sig(this.tasks) !== sig(merged);
+    const changed = this._signature(this.tasks) !== this._signature(merged);
     this.tasks = merged;
     if (changed) App.EventBus.emit('tasks:changed');
     return changed;
+  }
+
+  /* Canonical signature of a task list, used by mergeServer to answer "did the
+     server actually change anything?". Two rules make that answer honest:
+
+     1. LOCAL-ONLY FIELDS ARE INVISIBLE. Anything underscore-prefixed is view or
+        cache state some other module hung on the task; the server never sent it
+        and never will, so counting it means the local list can never match a
+        fresh server snapshot again — every idle poll then emits 'tasks:changed'
+        forever. That is not hypothetical: the comment thread used to park
+        `_commentsLoaded` here, and the whole app re-rendered every 30 seconds
+        because of it. Underscore-prefix is therefore the convention for
+        decorating a task in place; prefer not decorating it at all.
+     2. KEY ORDER IS NOT A CHANGE. Rows reach us both from _mapTaskRow and from
+        a local create, which build their objects in different orders.
+
+     The rule is deliberately one-sided: skip local decoration, keep every
+     server field. Wrongly skipping a real column would hide other people's
+     edits until reload — a far worse failure than the churn it replaces. */
+  _signature(list) {
+    const canon = (v) => {
+      if (Array.isArray(v)) return v.map(canon);
+      if (v && typeof v === 'object') {
+        const out = {};
+        for (const k of Object.keys(v).sort()) {
+          if (k.charAt(0) === '_') continue;
+          out[k] = canon(v[k]);
+        }
+        return out;
+      }
+      return v;
+    };
+    return JSON.stringify(
+      [...list]
+        .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+        .map(canon)
+    );
   }
 
   seedDefaults() {
