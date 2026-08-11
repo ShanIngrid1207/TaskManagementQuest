@@ -7346,6 +7346,15 @@ body.ui-command-center .controls-card .btn {
    (css/newtask.css): centered container, warm surface cards per section,
    sectioned headers. Markup unchanged — restyle only. */
 #timeViewWrap .tsetup { max-width: 1120px; margin: 0 auto; padding: var(--space-md) 2px 48px; color: var(--ink); }
+/* Upper-left escape hatch — same warm-flat pill language as the section chrome,
+   no hairline border; colour + fill carry it. */
+.tsetup-back { display: inline-flex; align-items: center; gap: 7px; margin: 0 0 14px; padding: 7px 13px 7px 10px;
+  background: var(--bg-2); border: 0; border-radius: 999px; cursor: pointer;
+  font-family: inherit; font-size: 12px; font-weight: 700; letter-spacing: .01em; color: var(--ink-3);
+  transition: color .14s ease, background .14s ease; }
+.tsetup-back:hover { background: var(--bg-3, var(--bg-2)); color: var(--ink); }
+.tsetup-back:focus-visible { outline: 2px solid var(--accent, #ED4E0D); outline-offset: 2px; }
+.tsetup-back i { font-size: 15px; }
 .tsetup-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
 .tsetup-title { font-family: var(--font-display); font-size: var(--text-2xl); font-weight: 800; letter-spacing: -0.02em; color: var(--ink); margin: 0; }
 .tsetup-sub { font-size: 13px; color: var(--ink-3); margin: 4px 0 0; }

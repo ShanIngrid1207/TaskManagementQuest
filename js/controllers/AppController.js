@@ -245,6 +245,9 @@ App.AppController = class AppController {
     // covering it — the "I want to go home, I can't go home" dead end.
     if (this.uiState.creatingTask) this.closeNewTaskPage();
     if (this.uiState.view === view) return;
+    // Where we came from, so page-level screens can offer a Back button. Kept
+    // off uiState on purpose: it's per-session breadcrumb, not persisted state.
+    this.previousView = this.uiState.view;
     const patch = { view, selectedTaskId: null };
     // All Tasks always OPENS in table view, whatever mode it was left in.
     // Explicit switches after entry (View menu, openCalendarOn) still apply.
@@ -256,6 +259,16 @@ App.AppController = class AppController {
     // onApply: panes must be visible before view:changed lands — several views
     // gate their render on !wrap.classList.contains('hidden').
     this._commit(patch, { onApply: () => this._togglePanes() });
+  }
+
+  /* Back out of a full-page screen to wherever the user came from. Falls back
+     to the landing view when there's no (or no longer permitted) breadcrumb —
+     e.g. deep-linked straight into the page, or the role changed since. */
+  goBack(fallback) {
+    const prev = this.previousView;
+    const ok = prev && prev !== this.uiState.view && this.canView(prev);
+    const home = this.canView('home') ? 'home' : (App.can('tasks.view') ? 'all' : 'time:mine');
+    this.setView(ok ? prev : (fallback && this.canView(fallback) ? fallback : home));
   }
 
   // The head-card "My work" / "Company" segment. Unlike setView this never

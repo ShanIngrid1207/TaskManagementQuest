@@ -79,6 +79,7 @@ App.TaskSetupAdminView = class TaskSetupAdminView {
 
     this.wrap.innerHTML = `
       <div class="tsetup">
+        <button class="tsetup-back" type="button" data-act="back" aria-label="Go back"><i class="ti ti-arrow-left"></i> Back</button>
         <div class="tsetup-head">
           <div>
             <p class="tsetup-sub">Customize the types, statuses, and labels for each workspace.</p>
@@ -192,6 +193,8 @@ App.TaskSetupAdminView = class TaskSetupAdminView {
     const name = el.dataset.name;
     const dir = Number(el.dataset.dir);
     switch (act) {
+      case 'back': return this.controller.goBack();
+
       case 'select-type': this.selectedType = el.dataset.key; return this.render();
 
       case 'add-type': return this._openEditor({ title: 'Add type', withColor: true, onSave: (nm, col) => this.controller.addType(this.company, nm, col) });
