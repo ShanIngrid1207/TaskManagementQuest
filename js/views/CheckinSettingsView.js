@@ -48,11 +48,14 @@ App.CheckinSettingsView = class CheckinSettingsView {
     this.wrap.innerHTML = `<div class="tsetup ci-wrap">
       <div class="tsetup-head"><h2 class="tsetup-title">Check-ins</h2></div>
       <p class="tsetup-sub">Proactive AI messages to your team, delivered to the notification bell and by email. Everything is off until you switch it on.</p>
-      ${this._row('morning_enabled', 'Morning recap', 'Each morning: a summary of their day plus “what are you tackling today?”')}
-      ${this._row('eod_enabled', 'End-of-day recap', 'Late afternoon: what they finished, what slipped, confirm the day.')}
+      ${this._row('morning_enabled', 'Morning recap', 'When they clock in (or 8am for people who don’t use the clock): their day plus “what are you tackling today?”')}
+      ${this._row('eod_enabled', 'End-of-day recap', 'When they clock out for the day (or 4pm for non-clock users): what they finished, what slipped, confirm the day.')}
       ${this._row('stalled_enabled', 'Stalled-task nudge', 'Weekly: a nudge listing tasks that have gone quiet.')}
       <label class="ci-days">Stalled after
         <input type="number" min="1" max="90" data-ci-days value="${this.cfg.stalled_days || 3}" /> days
+      </label>
+      <label class="ci-days">End-of-day fires after a clocker is idle
+        <input type="number" min="15" max="480" step="15" data-ci-idle value="${this.cfg.eod_idle_minutes || 90}" /> min
       </label>
       <div class="ci-actions"><button class="btn btn-primary" data-ci-save type="button">Save</button><span class="ci-status" data-ci-status></span></div>
     </div>`;
@@ -69,6 +72,7 @@ App.CheckinSettingsView = class CheckinSettingsView {
       eod_enabled: this.wrap.querySelector('[data-ci="eod_enabled"]').checked,
       stalled_enabled: this.wrap.querySelector('[data-ci="stalled_enabled"]').checked,
       stalled_days: this.wrap.querySelector('[data-ci-days]').value,
+      eod_idle_minutes: this.wrap.querySelector('[data-ci-idle]').value,
     };
     try { this.cfg = await this.dataStore.saveCheckinSettings(patch); status.textContent = 'Saved.'; }
     catch (e) { status.textContent = `Couldn’t save. ${this._esc((e && e.message) || '')}`; }

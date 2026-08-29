@@ -502,6 +502,7 @@ App.SupabaseDataStore = class SupabaseDataStore {
       eod_enabled: !!patch.eod_enabled,
       stalled_enabled: !!patch.stalled_enabled,
       stalled_days: Math.max(1, Math.min(90, parseInt(patch.stalled_days, 10) || 3)),
+      eod_idle_minutes: Math.max(15, Math.min(480, parseInt(patch.eod_idle_minutes, 10) || 90)),
       updated_by: this.currentUser || null,
       updated_at: new Date().toISOString(),
     };

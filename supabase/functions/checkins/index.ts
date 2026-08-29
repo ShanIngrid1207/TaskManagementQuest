@@ -9,7 +9,7 @@
 //   (SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY are injected automatically.)
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { firesNow, hqParts, weekKey } from "./lib/schedule.mjs";
+import { firesNow, hqParts, weekKey, isClocker, clockedInToday, eodReady, CLOCKER_WINDOW_DAYS } from "./lib/schedule.mjs";
 import { stalledByPerson, taskAssignees } from "./lib/stalled.mjs";
 import {
   morningContext, eodContext, shapeMessage,
@@ -84,20 +84,48 @@ Deno.serve(async (req: Request) => {
   const now = Date.now();
   const { dateKey } = hqParts(now);
 
-  // Settings gate.
+  // Settings gate. Recaps (morning/eod) are now per-person clock-driven, so their
+  // firing can't be decided globally up front; only stalled keeps a fixed window.
   const setRes = await db.from("checkin_settings").select("*").eq("id", 1).single();
-  const cfg = setRes.data ?? { morning_enabled: false, eod_enabled: false, stalled_enabled: false, stalled_days: 3 };
-  const active: string[] = [];
-  if (cfg.morning_enabled && firesNow("morning", now)) active.push("morning");
-  if (cfg.eod_enabled && firesNow("eod", now)) active.push("eod");
-  if (cfg.stalled_enabled && firesNow("stalled", now)) active.push("stalled");
-  if (!active.length) return new Response(JSON.stringify({ ok: true, scanned: 0, sent: 0, errors: [] }), { headers: { "Content-Type": "application/json" } });
+  const cfg = setRes.data ?? { morning_enabled: false, eod_enabled: false, stalled_enabled: false, stalled_days: 3, eod_idle_minutes: 90 };
+  const idleMinutes = Number(cfg.eod_idle_minutes) > 0 ? Number(cfg.eod_idle_minutes) : 90;
+  const doRecaps = !!(cfg.morning_enabled || cfg.eod_enabled);
+  const doStalled = !!cfg.stalled_enabled && firesNow("stalled", now);
+  // Nothing could fire on this tick: no recap modes on AND stalled not in its window.
+  if (!doRecaps && !doStalled) return new Response(JSON.stringify({ ok: true, scanned: 0, sent: 0, errors: [] }), { headers: { "Content-Type": "application/json" } });
 
   // Recipients: members with an email/id.
   const memRes = await db.from("team_members").select("id, email");
   const emailById = new Map<string, string>();
   const memberIds: string[] = [];
   (memRes.data ?? []).forEach((m: any) => { memberIds.push(m.id); if (m.email) emailById.set(m.id, String(m.email).trim()); });
+
+  // Clock data (only needed for recaps): who's a clocker, who clocked in today,
+  // and who has clocked out for the day. Keyed by member id (user_id == member id).
+  const startsByUser = new Map<string, number[]>();  // clock-in instants (active + entries)
+  const endsByUser = new Map<string, number[]>();     // clock-out instants (entry end_at)
+  const activeNow = new Set<string>();                 // currently clocked in
+  if (doRecaps) {
+    // Push a parsed timestamp onto a per-user list, skipping junk/nulls.
+    const push = (map: Map<string, number[]>, id: string, v: string | null) => {
+      const ms = v ? Date.parse(v) : NaN;
+      if (!id || Number.isNaN(ms)) return;
+      const list = map.get(id) ?? [];
+      list.push(ms);
+      map.set(id, list);
+    };
+    const [atRes, teRes] = await Promise.all([
+      db.from("active_timers").select("user_id, started_at"),
+      db.from("time_entries").select("user_id, start_at, end_at")
+        .gte("start_at", new Date(now - CLOCKER_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString()),
+    ]);
+    // Clock-table read failures degrade to "no clock data" (clockers just get no
+    // recap this tick) rather than crashing or blasting — logged, not fatal.
+    if (atRes.error) console.error("[checkins] active_timers load failed", atRes.error);
+    if (teRes.error) console.error("[checkins] time_entries load failed", teRes.error);
+    (atRes.data ?? []).forEach((r: any) => { if (r.user_id) { activeNow.add(r.user_id); push(startsByUser, r.user_id, r.started_at); } });
+    (teRes.data ?? []).forEach((r: any) => { push(startsByUser, r.user_id, r.start_at); push(endsByUser, r.user_id, r.end_at); });
+  }
 
   // All tasks (RLS bypassed; we filter per person in code).
   const taskRes = await db.from("tasks")
@@ -144,9 +172,24 @@ Deno.serve(async (req: Request) => {
     sent++;
   }
 
+  // Is a recap due for this person on this tick? Clockers follow their clock;
+  // everyone else keeps the fixed 8am/4pm window (firesNow).
+  function recapDue(mode: "morning" | "eod", person: string): boolean {
+    const starts = startsByUser.get(person) ?? [];
+    if (isClocker(starts, now)) {
+      return mode === "morning"
+        ? clockedInToday(starts, now)
+        : eodReady(endsByUser.get(person) ?? [], activeNow.has(person), now, idleMinutes);
+    }
+    return firesNow(mode, now);
+  }
+
   // --- Recap modes (morning / eod): one message per person per day. ---
-  for (const mode of active.filter((m) => m === "morning" || m === "eod")) {
+  const recapModes = ([["morning", cfg.morning_enabled], ["eod", cfg.eod_enabled]] as const)
+    .filter(([, on]) => on).map(([m]) => m);
+  for (const mode of recapModes) {
     for (const person of memberIds) {
+      if (!recapDue(mode, person)) continue;
       const mine = tasks.filter((t: any) => taskAssignees(t).includes(person));
       const ctx = mode === "morning" ? morningContext(mine, { today: dateKey }) : eodContext(mine, { today: dateKey });
       // Skip a person with nothing to say (no open work / no activity).
@@ -161,7 +204,7 @@ Deno.serve(async (req: Request) => {
   }
 
   // --- Stalled mode: one grouped message per person per week. ---
-  if (active.includes("stalled")) {
+  if (doStalled) {
     const period = weekKey(dateKey);
     const byPerson = stalledByPerson(tasks, { nowMs: now, stalledDays: cfg.stalled_days ?? 3 });
     for (const [person, items] of byPerson) {
