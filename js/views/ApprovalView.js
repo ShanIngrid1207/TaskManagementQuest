@@ -25,6 +25,36 @@ App.ApprovalView = class ApprovalView {
       });
   }
 
+  // The "Reports to" multi-picker for one profile: removable chips for the
+  // already-chosen supervisors + a "+ Add" dropdown of the remaining eligible
+  // people. Capped at 4. Selected ids live in data-sup-ids on the container;
+  // the dropdown and chips are re-rendered from it on every change.
+  supervisorPickerHtml(profile) {
+    const selected = Array.isArray(profile.supervisor_ids)
+      ? profile.supervisor_ids
+      : (profile.supervisor_id ? [profile.supervisor_id] : []);
+    return this.renderSupervisorPicker(this.supervisorOptions(profile.member_id), selected);
+  }
+
+  renderSupervisorPicker(options, selected) {
+    const MAX = 4;
+    const byId = new Map(options.map(o => [o.id, o.name]));
+    const chips = selected.map(id => `
+      <span class="rep-chip" data-sup="${App.utils.escapeHtml(id)}">
+        ${App.utils.escapeHtml(byId.get(id) || id)}
+        <button type="button" class="rep-chip-x" data-action="sup-remove" data-sup="${App.utils.escapeHtml(id)}" aria-label="Remove">&times;</button>
+      </span>`).join('');
+    const remaining = options.filter(o => !selected.includes(o.id));
+    const addControl = (selected.length >= MAX || remaining.length === 0)
+      ? (selected.length >= MAX ? '<span class="rep-cap">Max 4</span>' : '')
+      : `<select class="rep-add" data-action="sup-add">
+           <option value="">+ Add…</option>
+           ${remaining.map(o => `<option value="${App.utils.escapeHtml(o.id)}">${App.utils.escapeHtml(o.name)}</option>`).join('')}
+         </select>`;
+    const empty = selected.length ? '' : '<span class="rep-none">— None —</span>';
+    return `<div class="reports-multi" data-field="supervisors" data-sup-ids="${App.utils.escapeHtml(JSON.stringify(selected))}">${empty}${chips}${addControl}</div>`;
+  }
+
   render() {
     if (!App.can('roles.manage')) {
       this.wrap.innerHTML = `<div class="empty"><i class="ti ti-lock"></i><div class="empty-title">No access</div><div class="empty-sub">Only admins and construction supervisors can manage users.</div></div>`;
@@ -77,10 +107,6 @@ App.ApprovalView = class ApprovalView {
     const roles = roleEntries.map(([id, role]) =>
       `<option value="${App.utils.escapeHtml(id)}" ${profile.role === id ? 'selected' : ''}>${App.utils.escapeHtml(role.label)}</option>`
     ).join('');
-    const supervisorOpts = ['<option value="">— None —</option>']
-      .concat(this.supervisorOptions(profile.member_id).map(s =>
-        `<option value="${s.id}" ${profile.supervisor_id === s.id ? 'selected' : ''}>${App.utils.escapeHtml(s.name)}</option>`
-      )).join('');
     const companyIds = Array.isArray(profile.company_ids) ? profile.company_ids : [];
     // 'overall' (c.all) is NOT a tickable company: it's granted automatically to
     // anyone in 2+ real companies by the profiles_sync_overall trigger
@@ -102,7 +128,7 @@ App.ApprovalView = class ApprovalView {
         <td data-label="Role"><select data-field="role">${roles}</select></td>
         <td data-label="Position"><input type="text" class="approval-position-input" data-field="position" value="${App.utils.escapeHtml(profile.position || '')}" placeholder="e.g. Drafting Lead" maxlength="80" /></td>
         <td data-label="Company"><div class="company-multi" data-field="companies">${companyChecks}</div></td>
-        <td data-label="Reports to"><select data-field="supervisor">${supervisorOpts}</select></td>
+        <td data-label="Reports to">${this.supervisorPickerHtml(profile)}</td>
         <td data-label="Status">
           <label class="approval-toggle">
             <input type="checkbox" data-field="approved" ${profile.approved ? 'checked' : ''} />
@@ -135,13 +161,38 @@ App.ApprovalView = class ApprovalView {
       });
     });
 
+    // "Reports to" multi-picker: add via the dropdown, remove via a chip ×.
+    // Scoped to the surviving <td> so listeners persist across re-renders
+    // (renderSupervisorPicker replaces the inner .reports-multi via outerHTML).
+    this.wrap.querySelectorAll('td[data-label="Reports to"]').forEach(cell => {
+      const box = () => cell.querySelector('[data-field="supervisors"]');
+      const readIds = () => { try { return JSON.parse(box().dataset.supIds || '[]'); } catch { return []; } };
+      const rerender = (ids) => {
+        const excludeMember = cell.closest('[data-profile-id]')?.dataset.memberId || null;
+        box().outerHTML = this.renderSupervisorPicker(this.supervisorOptions(excludeMember), ids);
+      };
+      cell.addEventListener('change', (e) => {
+        const sel = e.target.closest('[data-action="sup-add"]');
+        if (!sel || !sel.value) return;
+        const ids = readIds();
+        if (!ids.includes(sel.value)) ids.push(sel.value);
+        rerender(ids);
+      });
+      cell.addEventListener('click', (e) => {
+        const rm = e.target.closest('[data-action="sup-remove"]');
+        if (!rm) return;
+        rerender(readIds().filter(id => id !== rm.dataset.sup));
+      });
+    });
+
     this.wrap.querySelectorAll('[data-action="save-access"]').forEach(button => {
       button.addEventListener('click', async () => {
         const row = button.closest('[data-profile-id]');
         const profileId = row.dataset.profileId;
         const role = row.querySelector('[data-field="role"]').value;
         const approved = row.querySelector('[data-field="approved"]').checked;
-        const supervisorId = row.querySelector('[data-field="supervisor"]').value || null;
+        let supervisorIds = [];
+        try { supervisorIds = JSON.parse(row.querySelector('[data-field="supervisors"]').dataset.supIds || '[]'); } catch { supervisorIds = []; }
         const position = (row.querySelector('[data-field="position"]').value || '').trim() || null;
         const companyIds = Array.from(
           row.querySelectorAll('[data-field="companies"] input[type="checkbox"]:checked')
@@ -149,7 +200,7 @@ App.ApprovalView = class ApprovalView {
         button.disabled = true;
         button.textContent = 'Saving';
         try {
-          await this.dataStore.updateProfileAccess(profileId, { role, approved, supervisorId, companyIds, position });
+          await this.dataStore.updateProfileAccess(profileId, { role, approved, supervisorIds, companyIds, position });
           // Mirror position into App.PEOPLE immediately so the picker reflects it
           // without waiting for a full data reload (team_members trigger runs async).
           const memberId = row.dataset.memberId;
@@ -203,10 +254,6 @@ App.ApprovalView = class ApprovalView {
         <input type="checkbox" value="${App.utils.escapeHtml(c.id)}" />
         <span>${App.utils.escapeHtml(c.label)}</span>
       </label>`).join('');
-    const supervisors = ['<option value="">— None —</option>']
-      .concat(this.supervisorOptions(null).map(s => `<option value="${App.utils.escapeHtml(s.id)}">${App.utils.escapeHtml(s.name)}</option>`))
-      .join('');
-
     const modal = document.createElement('div');
     modal.className = 'modal-backdrop';
     modal.id = 'addPersonModal';
@@ -225,8 +272,8 @@ App.ApprovalView = class ApprovalView {
             <select id="ap-role">${roles}</select></div>
           <div class="field" style="margin-top:12px;"><label class="field-label">Company</label>
             <div class="company-multi" id="ap-companies">${companies}</div></div>
-          <div class="field" style="margin-top:12px;"><label class="field-label" for="ap-supervisor">Reports to</label>
-            <select id="ap-supervisor">${supervisors}</select></div>
+          <div class="field" style="margin-top:12px;" id="ap-supervisors-field"><label class="field-label">Reports to</label>
+            ${this.renderSupervisorPicker(this.supervisorOptions(null), [])}</div>
           <div class="ap-result hidden" id="ap-result"></div>
           <div class="modal-actions">
             <button class="btn" data-action="close">Cancel</button>
@@ -241,6 +288,28 @@ App.ApprovalView = class ApprovalView {
     modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
     modal.querySelectorAll('[data-action="close"]').forEach(el => el.addEventListener('click', close));
     modal.querySelector('[data-action="submit"]').addEventListener('click', () => this.submitAddPerson(modal, close));
+
+    // "Reports to" multi-picker (chips + add), scoped to the stable field wrapper
+    // so listeners survive the outerHTML re-render (same pattern as the table cell).
+    const supField = modal.querySelector('#ap-supervisors-field');
+    if (supField) {
+      const box = () => supField.querySelector('[data-field="supervisors"]');
+      const readIds = () => { try { return JSON.parse(box().dataset.supIds || '[]'); } catch { return []; } };
+      const rerender = (ids) => { box().outerHTML = this.renderSupervisorPicker(this.supervisorOptions(null), ids); };
+      supField.addEventListener('change', (e) => {
+        const sel = e.target.closest('[data-action="sup-add"]');
+        if (!sel || !sel.value) return;
+        const ids = readIds();
+        if (!ids.includes(sel.value)) ids.push(sel.value);
+        rerender(ids);
+      });
+      supField.addEventListener('click', (e) => {
+        const rm = e.target.closest('[data-action="sup-remove"]');
+        if (!rm) return;
+        rerender(readIds().filter(id => id !== rm.dataset.sup));
+      });
+    }
+
     setTimeout(() => { const n = modal.querySelector('#ap-name'); if (n) n.focus(); }, 50);
   }
 
@@ -248,7 +317,8 @@ App.ApprovalView = class ApprovalView {
     const name = modal.querySelector('#ap-name').value.trim();
     const email = modal.querySelector('#ap-email').value.trim();
     const role = modal.querySelector('#ap-role').value;
-    const supervisorId = modal.querySelector('#ap-supervisor').value || null;
+    let supervisorIds = [];
+    try { supervisorIds = JSON.parse(modal.querySelector('#ap-supervisors-field [data-field="supervisors"]').dataset.supIds || '[]'); } catch { supervisorIds = []; }
     const companyIds = Array.from(modal.querySelectorAll('#ap-companies input[type="checkbox"]:checked')).map(el => el.value);
     const result = modal.querySelector('#ap-result');
 
@@ -258,7 +328,7 @@ App.ApprovalView = class ApprovalView {
     const btn = modal.querySelector('[data-action="submit"]');
     btn.disabled = true; btn.textContent = 'Creating…';
     try {
-      const res = await this.dataStore.createUser({ fullName: name, email, role, companyIds, supervisorId });
+      const res = await this.dataStore.createUser({ fullName: name, email, role, companyIds, supervisorIds });
       this.controller.toastView.show({
         title: 'Person added',
         sub: res.emailSent ? 'Account created and emailed.' : 'Account created — email could not be sent.',

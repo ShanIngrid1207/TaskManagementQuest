@@ -211,6 +211,17 @@ App.utils = {
     return this.taskAssignees(task).includes(userId);
   },
 
+  /* Does this profile report to `memberId`? A person may report to MULTIPLE
+     supervisors (migration 073): supervisor_ids[] holds team_members ids and
+     EVERY one of them oversees the person. Rows written before 073 carry only
+     the scalar supervisor_id (the primary), so fall back to it. Every "is this
+     my report?" seam must ask THIS, never `profile.supervisor_id === id`. */
+  reportsTo(profile, memberId) {
+    if (!profile || !memberId) return false;
+    if (Array.isArray(profile.supervisor_ids)) return profile.supervisor_ids.includes(memberId);
+    return profile.supervisor_id === memberId;
+  },
+
   peopleInCompany(companyId, includeIds) {
     const base = this.activePeople(includeIds);
     // 'overall' spans all companies → full roster, same as the '*' no-filter path.

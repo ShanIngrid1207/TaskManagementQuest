@@ -3,7 +3,8 @@ window.App = window.App || {};
 /* HierarchyView — supervisor org chart.
    Renders into the shared timeViewWrap container on the 'team:hierarchy' view.
    Hierarchy is derived from profiles:
-     - explicit per-user override: profile.supervisor_id (a team_member id)
+     - explicit per-user override: profile.supervisor_ids (team_member ids; a
+       person may report to several supervisors and appears under each)
      - role default: workers/members with no supervisor form a shared "Unassigned"
        pool that every supervisor oversees.
    Managers (admin / construction supervisor / developer) see the full chart;
@@ -53,11 +54,13 @@ App.HierarchyView = class HierarchyView {
     const me = App.currentProfile || {};
     const isManager = App.can('roles.manage');
 
+    // A person reporting to N supervisors appears under EACH of them (migration 073).
     const directReports = (memberId) => profiles
-      .filter(p => p.supervisor_id === memberId)
+      .filter(p => App.utils.reportsTo(p, memberId))
       .sort((a, b) => this.person(a.member_id).full.localeCompare(this.person(b.member_id).full));
+    const hasSupervisor = (p) => Array.isArray(p.supervisor_ids) ? p.supervisor_ids.length > 0 : !!p.supervisor_id;
     const unassignedPool = profiles
-      .filter(p => !p.supervisor_id && poolRoles.includes(p.role))
+      .filter(p => !hasSupervisor(p) && poolRoles.includes(p.role))
       .sort((a, b) => this.person(a.member_id).full.localeCompare(this.person(b.member_id).full));
 
     const sections = [];

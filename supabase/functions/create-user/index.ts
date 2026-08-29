@@ -9,6 +9,11 @@
 // server-side. The Quest HQ client invokes it with
 // supabase.functions.invoke('create-user').
 //
+// ⚠️ This version writes profiles.supervisor_ids[] (multiple supervisors,
+// migration 073). DEPLOY ONLY AFTER 073 is applied — the column must exist or
+// the profile promote fails. The client sends { supervisorIds: string[] };
+// legacy { supervisorId } is still accepted.
+//
 // DEPLOY (one-time):
 //   supabase secrets set DEFAULT_NEW_USER_PASSWORD="<your default>"
 //   supabase secrets set APP_URL="https://your-app.vercel.app"      (for the email link)
@@ -68,8 +73,11 @@ interface CreatePayload {
   email?: unknown;
   role?: unknown;
   companyIds?: unknown;
-  supervisorId?: unknown;
+  supervisorIds?: unknown;
+  supervisorId?: unknown; // legacy single-supervisor callers
 }
+
+const MAX_SUPERVISORS = 4;
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeadersFor(req) });
@@ -111,8 +119,14 @@ Deno.serve(async (req: Request) => {
     const fullName = typeof payload.fullName === "string" ? payload.fullName.trim() : "";
     const email = typeof payload.email === "string" ? payload.email.trim().toLowerCase() : "";
     const role = typeof payload.role === "string" ? payload.role.trim() : "";
-    const supervisorId = typeof payload.supervisorId === "string" && payload.supervisorId.trim()
-      ? payload.supervisorId.trim() : null;
+    // Multiple supervisors (migration 073). Prefer the array; fall back to the
+    // legacy single supervisorId. De-duped, trimmed, capped at MAX_SUPERVISORS.
+    const supervisorIds = (Array.isArray(payload.supervisorIds)
+      ? payload.supervisorIds
+      : (typeof payload.supervisorId === "string" ? [payload.supervisorId] : []))
+      .filter((s): s is string => typeof s === "string" && s.trim().length > 0)
+      .map((s) => s.trim());
+    const uniqueSupervisorIds = [...new Set(supervisorIds)].slice(0, MAX_SUPERVISORS);
     const companyIds = Array.isArray(payload.companyIds)
       ? [...new Set(payload.companyIds.filter((c): c is string => typeof c === "string"))]
           .filter((c) => KNOWN_COMPANIES.has(c))
@@ -148,8 +162,10 @@ Deno.serve(async (req: Request) => {
     // profile (approved=false, role='worker') and the team_members row. Promote
     // it; the sync triggers (045/039) propagate company_ids/full_name and flip
     // team_members.active to true.
+    // Write supervisor_ids (migration 073); the DB sync trigger derives the
+    // scalar supervisor_id = supervisor_ids[1]. Requires 073 to be applied.
     const updated = await admin.from("profiles")
-      .update({ approved: true, role, full_name: fullName, company_ids: companyIds, supervisor_id: supervisorId })
+      .update({ approved: true, role, full_name: fullName, company_ids: companyIds, supervisor_ids: uniqueSupervisorIds })
       .eq("id", newId)
       .select("member_id")
       .maybeSingle();

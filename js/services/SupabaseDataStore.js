@@ -6,7 +6,7 @@ App.SupabaseDataStore = class SupabaseDataStore {
     this.supabase = supabase;
     this.currentUser = currentUser;
     this.role = role || 'member';
-    this._profileColumns = 'id, email, full_name, approved, role, email_verified, member_id, supervisor_id, company_ids, avatar_url, position, created_at';
+    this._profileColumns = 'id, email, full_name, approved, role, email_verified, member_id, supervisor_id, supervisor_ids, company_ids, avatar_url, position, created_at';
     // Last-seen updated_at per task id — used as an optimistic-concurrency guard
     // so a save can't silently clobber an edit made elsewhere.
     this._taskVersions = {};
@@ -858,8 +858,9 @@ App.SupabaseDataStore = class SupabaseDataStore {
       role: updates.role,
       approved: !!updates.approved,
     };
-    // supervisorId / companyIds / position are optional; only set them when provided.
-    if ('supervisorId' in updates) patch.supervisor_id = updates.supervisorId || null;
+    // supervisorIds / companyIds / position are optional; only set them when provided.
+    // supervisor_id (the scalar primary) is derived by the DB sync trigger (migration 073).
+    if ('supervisorIds' in updates) patch.supervisor_ids = Array.isArray(updates.supervisorIds) ? updates.supervisorIds : [];
     if ('companyIds' in updates) patch.company_ids = Array.isArray(updates.companyIds) ? updates.companyIds : [];
     if ('position' in updates) patch.position = updates.position || null;
     const res = await this.supabase
@@ -921,14 +922,14 @@ App.SupabaseDataStore = class SupabaseDataStore {
      profile with the chosen role/company/supervisor, and emails the person their
      default password. Returns { ok, profileId, memberId, emailSent }. Throws an
      Error carrying the function's message on failure (e.g. duplicate email). */
-  async createUser({ fullName, email, role, companyIds, supervisorId }) {
+  async createUser({ fullName, email, role, companyIds, supervisorIds }) {
     const { data, error } = await this.supabase.functions.invoke('create-user', {
       body: {
         fullName,
         email,
         role,
         companyIds: Array.isArray(companyIds) ? companyIds : [],
-        supervisorId: supervisorId || null,
+        supervisorIds: Array.isArray(supervisorIds) ? supervisorIds : [],
       },
     });
     if (error) {

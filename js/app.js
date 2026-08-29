@@ -46,7 +46,8 @@ document.addEventListener('DOMContentLoaded', async () => {
           if (p) {
             p.role = updates.role;
             p.approved = !!updates.approved;
-            if ('supervisorId' in updates) p.supervisor_id = updates.supervisorId || null;
+            if ('supervisorIds' in updates) { p.supervisor_ids = Array.isArray(updates.supervisorIds) ? updates.supervisorIds : []; p.supervisor_id = p.supervisor_ids[0] || null; }
+            else if ('supervisorId' in updates) { p.supervisor_id = updates.supervisorId || null; p.supervisor_ids = p.supervisor_id ? [p.supervisor_id] : []; }
             if ('companyIds' in updates) p.company_ids = Array.isArray(updates.companyIds) ? updates.companyIds : [];
           }
           return p || {};
@@ -96,6 +97,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         email_verified: true,
         member_id: p.id,
         supervisor_id: cfg.supervisor_id || null,
+        supervisor_ids: cfg.supervisor_id ? [cfg.supervisor_id] : [],
         company_ids: Array.isArray(cfg.company_ids) ? cfg.company_ids : (cfg.company_id ? [cfg.company_id] : []),
         created_at: new Date().toISOString(),
       };

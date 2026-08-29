@@ -35,6 +35,7 @@ App.authReady = (async function () {
       email_verified: true,
       member_id: previewMember,
       supervisor_id: null,
+      supervisor_ids: [],
     };
     App.signOut = function () { window.location.href = window.location.pathname; };
     return;

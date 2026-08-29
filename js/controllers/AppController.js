@@ -123,7 +123,7 @@ App.AppController = class AppController {
       base = base.filter(t => App.utils.isAssignee(t, this.currentUser) || t.creator === this.currentUser);
     } else if (role === 'supervisor' && App.realRole() !== 'developer') {
       const reports = new Set((App.PROFILES || [])
-        .filter(p => p.supervisor_id === me).map(p => p.member_id));
+        .filter(p => App.utils.reportsTo(p, me)).map(p => p.member_id));
       base = base.filter(t =>
         App.utils.isAssignee(t, this.currentUser) ||
         t.creator === this.currentUser ||
@@ -595,7 +595,7 @@ App.AppController = class AppController {
   _reportMemberIds(role) {
     const me = (App.currentProfile && App.currentProfile.member_id) || this.currentUser;
     return (role === 'supervisor' && App.realRole() !== 'developer')
-      ? new Set((App.PROFILES || []).filter(p => p.supervisor_id === me).map(p => p.member_id))
+      ? new Set((App.PROFILES || []).filter(p => App.utils.reportsTo(p, me)).map(p => p.member_id))
       : null;
   }
 
