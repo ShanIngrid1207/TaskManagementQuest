@@ -6669,6 +6669,22 @@ body.panze-tasks .deck .side-item.active { background: var(--amber-bg); color: v
 .cm-text { font-size: 12.8px; line-height: 1.5; color: var(--ink-2); white-space: pre-wrap; word-break: break-word; }
 .cm-at { color: var(--amber); font-weight: 600; }
 
+/* Addresses pasted into a brief or a comment. The prose around them is ALL CAPS
+   by design and the link keeps its own case, so it needs to read as a link on
+   its own — the browser default blue belongs to no theme here. */
+.detail-desc a,
+.cm-text a {
+  color: var(--accent, #ED4E0D);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+  overflow-wrap: anywhere;
+}
+.detail-desc a:hover,
+.cm-text a:hover { text-decoration-thickness: 2px; }
+.detail-desc a:focus-visible,
+.cm-text a:focus-visible { outline: 2px solid var(--accent, #ED4E0D); outline-offset: 2px; border-radius: 2px; }
+
 .cm-composer { position: relative; }
 .cm-input {
   width: 100%; box-sizing: border-box; resize: vertical; min-height: 38px;

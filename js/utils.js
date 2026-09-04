@@ -22,14 +22,90 @@ App.utils = {
     return String(name || '').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
   },
 
+  /* One detector for the things inside free text that carry their own
+     capitalization and are worth making clickable: http(s) addresses, bare
+     www. addresses, and email addresses. A fresh instance per call because /g
+     regexes carry lastIndex between uses. Note that "javascript:" and friends
+     never match, so they can never be turned into a link. */
+  linkPattern() {
+    return /(?:https?:\/\/|www\.)[^\s<>"']+|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/gi;
+  },
+
+  /* Sentence punctuation that trails a link is not part of it:
+     "proof is at https://a.co/b." -> the link stops before the period. */
+  trimLinkTail(token) {
+    let out = String(token);
+    // Repeat until nothing more comes off: "(see https://a.co/b.)" has to lose
+    // the bracket and then the period, and one pass each only gets the bracket.
+    for (let before = null; before !== out;) {
+      before = out;
+      if (out && '.,;:!?'.includes(out.slice(-1))) out = out.slice(0, -1);
+      // Only drop a closing ")" that the link did not open itself, so
+      // .../wiki/Foo_(bar) survives intact.
+      else if (out.endsWith(')') && (out.match(/\(/g) || []).length < (out.match(/\)/g) || []).length) {
+        out = out.slice(0, -1);
+      }
+    }
+    return out;
+  },
+
+  linkHref(token) {
+    if (/^https?:\/\//i.test(token)) return token;
+    if (/^www\./i.test(token)) return `https://${token}`;
+    return `mailto:${token}`;
+  },
+
+  /* Split free text into segments of { text, link }, where link is the href for
+     a detected address and null for plain prose. Single source of truth so that
+     upper() and linkifyText() always agree on where a link starts and ends. */
+  splitLinks(value) {
+    const source = String(value == null ? '' : value);
+    const re = App.utils.linkPattern();
+    const parts = [];
+    let last = 0;
+    let match;
+    while ((match = re.exec(source))) {
+      const token = App.utils.trimLinkTail(match[0]);
+      if (!token) continue;
+      if (match.index > last) parts.push({ text: source.slice(last, match.index), link: null });
+      parts.push({ text: token, link: App.utils.linkHref(token) });
+      last = match.index + token.length;
+    }
+    if (last < source.length) parts.push({ text: source.slice(last), link: null });
+    return parts;
+  },
+
   /* Uppercase a free-text field value on save. The user types normally; this is
      applied at the save seams (createTask, updateTaskDetails, updateTaskField for
      title/description, addTaskComment, createProject) so task/project titles,
      descriptions, subtasks and notes are stored ALL CAPS. Non-strings pass
      through untouched (null/undefined stay as-is), and it's idempotent — safe to
-     apply to an already-uppercased value (e.g. a duplicated task). */
+     apply to an already-uppercased value (e.g. a duplicated task).
+
+     Web and email addresses keep their own capitalization: everything after the
+     domain is case-sensitive, so shouting a Drive/Dropbox/YouTube id aims the
+     link at a file that does not exist. */
   upper(v) {
-    return typeof v === 'string' ? v.toUpperCase() : v;
+    if (typeof v !== 'string') return v;
+    return App.utils.splitLinks(v)
+      .map(part => (part.link ? part.text : part.text.toUpperCase()))
+      .join('');
+  },
+
+  /* Escape free text for display and turn any address in it into a real link.
+     Escaping happens per segment, never on the assembled HTML, so entities can
+     never leak into an href and markup can never survive as markup.
+
+     onPlain, when given, post-processes each already-escaped plain segment (the
+     comment view uses it to highlight @mentions). It never sees link segments,
+     so a caller's regex can't rewrite an href — an email link's own "@" would
+     otherwise be mangled. */
+  linkifyText(value, onPlain) {
+    return App.utils.splitLinks(value)
+      .map(part => (part.link
+        ? `<a href="${App.utils.escapeHtml(part.link)}" target="_blank" rel="noopener noreferrer">${App.utils.escapeHtml(part.text)}</a>`
+        : (onPlain ? onPlain(App.utils.escapeHtml(part.text)) : App.utils.escapeHtml(part.text))))
+      .join('');
   },
 
   /* Trap Tab focus inside `container` (so it can't escape into the page behind a

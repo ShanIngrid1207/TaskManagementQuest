@@ -368,7 +368,7 @@ App.TaskDetailView = class TaskDetailView {
 
       <div class="td2-brief${t.description ? '' : ' is-empty'}">
         <div class="td2-brief-lbl">Brief${canWrite ? `<button class="td2-brief-edit" data-action="edit-desc" title="Edit brief" aria-label="Edit brief" type="button"><i class="ti ti-pencil"></i></button>` : ''}</div>
-        <div class="detail-desc td2-brief-body"${canWrite ? ' data-edit-field="description" tabindex="0" role="button" title="Click to edit · saves on click-away"' : ''}>${App.utils.escapeHtml(t.description || (canWrite ? 'No brief yet. Click to add context, links, and detail.' : 'No brief yet.'))}</div>
+        <div class="detail-desc td2-brief-body"${canWrite ? ' data-edit-field="description" tabindex="0" role="button" title="Click to edit · saves on click-away"' : ''}>${App.utils.linkifyText(t.description || (canWrite ? 'No brief yet. Click to add context, links, and detail.' : 'No brief yet.'))}</div>
       </div>
 
       <div class="td2-grid">
@@ -600,7 +600,12 @@ App.TaskDetailView = class TaskDetailView {
     if (descPencil) descPencil.addEventListener('click', () => this._openDescEdit(t));
     const descText = q('[data-edit-field="description"]');
     if (descText) {
-      descText.addEventListener('click', () => this._openDescEdit(t));
+      // A link inside the brief is a link first: let the click through instead
+      // of swallowing it into the inline editor.
+      descText.addEventListener('click', (e) => {
+        if (e.target.closest('a')) return;
+        this._openDescEdit(t);
+      });
       descText.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this._openDescEdit(t); }
       });
@@ -1137,8 +1142,10 @@ App.TaskDetailView = class TaskDetailView {
       if (/^\s*📞/.test(raw)) { tag = 'CALL LOG'; raw = raw.replace(/^\s*📞\s*/, ''); }
       else if (/^\s*📝/.test(raw)) { tag = 'NOTE'; raw = raw.replace(/^\s*📝\s*/, ''); }
     }
-    // Escape first, then lightly highlight @mention tokens.
-    const body = esc(raw).replace(/@(\w[\w.]*)/g, '<span class="cm-at">@$1</span>');
+    // Linkify addresses first, then lightly highlight @mention tokens. The
+    // highlighter only ever sees plain segments, so it cannot rewrite an href —
+    // an email link's own "@" would otherwise be mangled.
+    const body = App.utils.linkifyText(raw, s => s.replace(/@(\w[\w.]*)/g, '<span class="cm-at">@$1</span>'));
     const tagHtml = tag
       ? `<span class="td2-cm-tag ${tag === 'CALL LOG' ? 'call' : 'note'}"><i class="ti ${tag === 'CALL LOG' ? 'ti-phone' : 'ti-note'}"></i>${tag}</span>`
       : '';
