@@ -129,3 +129,37 @@ test('a link that legitimately ends in a bracket keeps it', () => {
     /href="https:\/\/en\.wikipedia\.org\/wiki\/Foo_\(bar\)"/,
   );
 });
+
+// --- Rescuing links mangled before the auto-caps fix -------------------------
+// Everything saved between the auto-caps feature and its fix is stored fully
+// uppercased. Nobody types a link that way, so an all-caps address is a
+// reliable tell that the old code mangled it — open it in lowercase. Display
+// only: the stored value is never rewritten.
+
+test('a legacy all-caps link opens in lowercase', () => {
+  const utils = loadUtils();
+  const html = utils.linkifyText('LINK FOR THE DESIGNS: HTTPS://LUMEN-MARKETING.GITHUB.IO/ZWINDOW-DESIGNS/');
+  assert.match(html, /href="https:\/\/lumen-marketing\.github\.io\/zwindow-designs\/"/);
+});
+
+test('a legacy all-caps link is also shown in lowercase, so it can be copied', () => {
+  const utils = loadUtils();
+  const html = utils.linkifyText('SEE HTTPS://A.CO/B');
+  assert.match(html, />https:\/\/a\.co\/b</);
+});
+
+test('a legacy all-caps email opens as a lowercase mailto', () => {
+  const utils = loadUtils();
+  assert.match(utils.linkifyText('EMAIL BOB@EXAMPLE.COM'), /href="mailto:bob@example\.com"/);
+});
+
+test('a link with real mixed capitalization is never touched', () => {
+  const utils = loadUtils();
+  const html = utils.linkifyText('SEE https://drive.google.com/file/d/aBc123XyZ/view');
+  assert.match(html, /href="https:\/\/drive\.google\.com\/file\/d\/aBc123XyZ\/view"/);
+});
+
+test('rescuing is display-only: auto-caps never rewrites a stored link', () => {
+  const utils = loadUtils();
+  assert.equal(utils.upper('see HTTPS://A.CO/B now'), 'SEE HTTPS://A.CO/B NOW');
+});

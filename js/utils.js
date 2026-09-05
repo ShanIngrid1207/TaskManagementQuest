@@ -92,6 +92,18 @@ App.utils = {
       .join('');
   },
 
+  /* Everything saved between the auto-caps feature and its fix is stored fully
+     uppercased. Nobody types an address that way, so an all-caps one is a
+     reliable tell that the old code mangled it — show and open it in lowercase.
+     A host is case-insensitive, so that half is always safe; a path usually was
+     lowercase to begin with, and where it wasn't (a Drive id) the original is
+     gone either way, so lowercasing can only help. Display only: upper() never
+     applies this, so nothing already stored is rewritten. */
+  rescueShoutedLink(token) {
+    const s = String(token);
+    return (/[A-Z]/.test(s) && !/[a-z]/.test(s)) ? s.toLowerCase() : s;
+  },
+
   /* Escape free text for display and turn any address in it into a real link.
      Escaping happens per segment, never on the assembled HTML, so entities can
      never leak into an href and markup can never survive as markup.
@@ -102,9 +114,15 @@ App.utils = {
      otherwise be mangled. */
   linkifyText(value, onPlain) {
     return App.utils.splitLinks(value)
-      .map(part => (part.link
-        ? `<a href="${App.utils.escapeHtml(part.link)}" target="_blank" rel="noopener noreferrer">${App.utils.escapeHtml(part.text)}</a>`
-        : (onPlain ? onPlain(App.utils.escapeHtml(part.text)) : App.utils.escapeHtml(part.text))))
+      .map(part => {
+        if (!part.link) {
+          const plain = App.utils.escapeHtml(part.text);
+          return onPlain ? onPlain(plain) : plain;
+        }
+        const shown = App.utils.rescueShoutedLink(part.text);
+        const href = App.utils.escapeHtml(App.utils.linkHref(shown));
+        return `<a href="${href}" target="_blank" rel="noopener noreferrer">${App.utils.escapeHtml(shown)}</a>`;
+      })
       .join('');
   },
 
